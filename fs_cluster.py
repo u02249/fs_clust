@@ -1,46 +1,96 @@
-from statemachine import StateMachine, State
 import uuid
-import etcd3
-from time import sleep
-class ClusterManager(StateMachine):
-
-    slave = State('slave', initial = True)
-    candidat = State('candidat')
-    master = State('master')
-    fail = State('fail')
+import atexit
+import etcd
+import threading
+import logging
 
 
-    key_not_found = slave.to(candidat)
-    connection_lost = slave.to(fail)
-    connection_repair = fail.to(slave)
-    connection_not_found = fail.to(fail)
-    key_not_my = slave.to(slave)
-    key_not_set = candidat.to(slave)
-    key_set = candidat.to(master)
-    key_update = master.to(master)
-    key_not_update = master.to(slave)
-
-
-class Watcher():
+class ClusterManager():
     def __init__(self):
-        self.c = ClusterManager()
-        self.key_name = "/super/fs_cluster"
+        cluster_name = "SuperCluster"
         self.my_key = uuid.uuid4().__str__()
+        self.con = etcd.Connection(cluster_name, self.my_key)
+        self.max_wait_time = 5;
 
-    def etcd(self):
-        with etcd3.client(host='34.69.186.246', port=2379) as cli:
-            yield cli
+        logger = logging.getLogger("ClusterMnager")
+        logger.setLevel(logging.DEBUG)
+        # create the logging file handler
+        fh = logging.StreamHandler()
 
-    def watch(self):
-        while True:
-            cli = self.etcd().__next__()
-            try:
-                cli.get(key_name)
-            print(cli)
-            cli.close()
-            sleep(5)
+        formatter = logging.Formatter('%(asctime)s:%(name)s[%(levelname)s]\t %(message)s')
+        fh.setFormatter(formatter)
+        # add handler to logger object
+        logger.addHandler(fh)
 
+        self.log = logger
+
+    def check_connection(self):
+        self.log.debug("checking ETCD server connection")
+        res = self.con.is_connect()
+        return res
+
+    def check_key(self):
+        self.log.debug("checking exists key")
+        res = self.con.get_key()
+        return res is not None
+
+    def key_is_my(self):
+        self.log.debug("checking key is my")
+        res = self.con.get_key()
+        if res == self.my_key:
+            return True
+        else:
+            return False
+
+    def update_key(self):
+        self.log.debug("update key")
+        return self.con.set_key()
+
+    def set_key(self):
+        self.log.debug("sen new key")
+        res = self.con.set_key()
+        return self.con.set_key()
+
+    def stop_service(self):
+        self.log.warning("service is stopped!!!")
+
+
+    def start_service(self):
+        self.log.warning("service is started!!!")
+
+    def wait(self):
+        timer = threading.Timer(self.max_wait_time, self.wait)
+        timer.start()
+        if self.check_connection():
+            if self.check_key():
+                if self.key_is_my():
+                    if not self.update_key():
+                        self.stop_service()
+                    else:
+                        self.log.debug("im master!!!")
+                else:
+                    self.log.debug('im slave!!')
+                    self.stop_service()
+            else:
+                self.log.warning('key not found')
+                if self.set_key():
+                    self.start_service()
+                else:
+                    self.stop_service()
+        else:
+            self.log.warning('connection not esteblished')
+            self.stop_service()
+
+
+
+
+
+@atexit.register
+def exit_func():
+    print("goodbay")
 
 if __name__ == "__main__":
-    w = Watcher()
-    w.watch()
+    cm = ClusterManager()
+    cm.wait()
+
+
