@@ -3,12 +3,21 @@ import atexit
 import etcd
 import threading
 import logging
+import os
 
 
 class ClusterManager():
     def __init__(self):
         cluster_name = "SuperCluster"
-        self.my_key = uuid.uuid4().__str__()
+        if not os.path.isfile('key'):
+            file = open("key", mode='w')
+            self.my_key = uuid.uuid4().__str__()
+            file.write(self.my_key)
+            file.close()
+        else:
+            file = open("key", mode='r')
+            self.my_key = file.read()
+            file.close()
         self.con = etcd.Connection(cluster_name, self.my_key)
         self.max_wait_time = 5;
 
